@@ -11,6 +11,8 @@ independent HTTP client, not part of the agentd runtime.
 - Submit only to agentd's canonical tenant REST API.
 - Deliver replies only by claiming and acknowledging agentd delivery rows.
 - Keep Telegram-specific rendering, media handling, retry, and webhook policy here.
+- Call the configured ASR/TTS provider directly; voice media must not transit
+  through agentd tools or artifacts.
 - Never link agentd crates, read its database, inspect run output as a fallback, or
   add a direct reply path from webhook handling.
 - Keep credentials in environment files; never commit secrets.

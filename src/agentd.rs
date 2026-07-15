@@ -24,7 +24,6 @@ const OVERSIZED_RESPONSE_BODY_NOTE: &str = "[response body omitted: exceeded 104
 pub trait AgentdApi: Send + Sync {
     async fn submit_turn(&self, payload: SubmitTurn) -> Result<Value, AgentdError>;
     async fn wait_run(&self, run_id: Uuid, timeout_ms: u64) -> Result<Value, AgentdError>;
-    async fn call_tool(&self, tool: &str, arguments: Value) -> Result<Value, AgentdError>;
     async fn claim_delivery_outbox(
         &self,
         limit: usize,
@@ -167,33 +166,6 @@ impl AgentdApi for AgentdClient {
         self.json_response(response).await
     }
 
-    async fn call_tool(&self, tool: &str, arguments: Value) -> Result<Value, AgentdError> {
-        validate_relative_path(tool)?;
-        let response = self
-            .request(
-                reqwest::Method::POST,
-                self.endpoint(&["v1", "tenants", &self.config.tenant, "tools", "execute"])?,
-                self.config.audio_tool_timeout,
-            )
-            .json(&serde_json::json!({
-                "name": tool,
-                "params": arguments,
-            }))
-            .send()
-            .await
-            .map_err(|_| AgentdError::Transport)?;
-        let envelope = self.json_response::<ToolExecuteResponse>(response).await?;
-        if envelope.ok {
-            Ok(envelope.result)
-        } else {
-            let transient = matches!(
-                envelope.error_category.as_deref(),
-                Some("transient_backend")
-            );
-            Err(AgentdError::ToolFailure { transient })
-        }
-    }
-
     async fn claim_delivery_outbox(
         &self,
         limit: usize,
@@ -251,7 +223,7 @@ impl AgentdApi for AgentdClient {
             .request(
                 reqwest::Method::GET,
                 self.raw_artifact_url(tenant, path)?,
-                self.config.audio_tool_timeout,
+                self.config.media_timeout,
             )
             .send()
             .await
@@ -299,7 +271,7 @@ impl AgentdApi for AgentdClient {
             .request(
                 reqwest::Method::PUT,
                 self.raw_artifact_url(tenant, path)?,
-                self.config.audio_tool_timeout,
+                self.config.media_timeout,
             )
             .header(CONTENT_TYPE, media.content_type())
             .header(CONTENT_LENGTH, len)
@@ -328,15 +300,6 @@ pub struct DeliveryAck {
     pub outcome: String,
     pub error: Option<String>,
     pub retry_after_ms: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct ToolExecuteResponse {
-    ok: bool,
-    #[serde(default)]
-    result: Value,
-    #[serde(default)]
-    error_category: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -376,8 +339,6 @@ pub enum AgentdError {
     HttpStatus { status: u16, body: String },
     #[error("agentd returned invalid JSON")]
     InvalidJson,
-    #[error("agentd tool execution failed")]
-    ToolFailure { transient: bool },
 }
 
 impl From<MediaError> for AgentdError {

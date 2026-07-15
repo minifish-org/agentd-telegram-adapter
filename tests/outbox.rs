@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agentd_telegram_adapter::agentd::{AgentdApi, AgentdError, DeliveryAck, SubmitTurn};
+use agentd_telegram_adapter::audio::{AudioApi, AudioError};
 use agentd_telegram_adapter::delivery::DeliveryService;
 use agentd_telegram_adapter::media::TempMedia;
 use agentd_telegram_adapter::model::{DeliveryOutboxRecord, TelegramChatId};
@@ -20,6 +21,7 @@ fn config(root: &std::path::Path) -> Config {
     let values = HashMap::from([
         ("BOT_TOKEN", "bot-secret".to_string()),
         ("WEBHOOK_SECRET", "webhook-secret".to_string()),
+        ("AUDIO_API_BASE", "https://audio.example/v1".to_string()),
         ("STATE_DIR", root.display().to_string()),
         ("MEDIA_TEMP_DIR", root.join("media").display().to_string()),
         ("FFMPEG_PATH", root.join("ffmpeg").display().to_string()),
@@ -53,9 +55,6 @@ impl AgentdApi for FakeAgentd {
     async fn wait_run(&self, _: Uuid, _: u64) -> Result<Value, AgentdError> {
         unreachable!()
     }
-    async fn call_tool(&self, _: &str, _: Value) -> Result<Value, AgentdError> {
-        unreachable!()
-    }
     async fn claim_delivery_outbox(
         &self,
         _: usize,
@@ -81,6 +80,19 @@ impl AgentdApi for FakeAgentd {
 
 struct FakeTelegram {
     result: Mutex<Result<TelegramMessageResult, TelegramError>>,
+}
+
+struct FakeAudio;
+
+#[async_trait]
+impl AudioApi for FakeAudio {
+    async fn transcribe(&self, _: &TempMedia, _: &str) -> Result<String, AudioError> {
+        unreachable!()
+    }
+
+    async fn synthesize(&self, _: &str) -> Result<TempMedia, AudioError> {
+        unreachable!()
+    }
 }
 
 impl FakeTelegram {
@@ -143,7 +155,7 @@ fn service(
     agentd: Arc<FakeAgentd>,
     telegram: Arc<FakeTelegram>,
 ) -> DeliveryService {
-    DeliveryService::new(config(root), agentd, telegram)
+    DeliveryService::new(config(root), agentd, Arc::new(FakeAudio), telegram)
 }
 
 #[tokio::test]

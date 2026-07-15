@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agentd_telegram_adapter::agentd::{AgentdApi, AgentdError, DeliveryAck, SubmitTurn};
+use agentd_telegram_adapter::audio::{AudioApi, AudioError};
 use agentd_telegram_adapter::media::TempMedia;
 use agentd_telegram_adapter::model::{DeliveryOutboxRecord, TelegramChatId, TelegramUpdate};
 use agentd_telegram_adapter::telegram::{
@@ -42,6 +43,7 @@ fn test_config(root: &Path, allowed_users: &str) -> Config {
     let values = HashMap::from([
         ("BOT_TOKEN", "bot-secret".to_string()),
         ("WEBHOOK_SECRET", "webhook-secret".to_string()),
+        ("AUDIO_API_BASE", "https://audio.example/v1".to_string()),
         ("DECOY_FILE", decoy.display().to_string()),
         ("STATE_DIR", root.display().to_string()),
         ("MEDIA_TEMP_DIR", root.join("media").display().to_string()),
@@ -370,7 +372,7 @@ struct FakeAgentd {
     run_id: Uuid,
     submits: Mutex<Vec<SubmitTurn>>,
     uploads: Mutex<Vec<UploadedArtifact>>,
-    tool_calls: Mutex<Vec<(String, Value)>>,
+    audio_calls: Mutex<Vec<(String, Vec<u8>)>>,
     transcript: Mutex<Option<String>>,
     submit_fails: AtomicBool,
     wait_calls: AtomicUsize,
@@ -385,7 +387,7 @@ impl FakeAgentd {
             run_id: Uuid::new_v4(),
             submits: Mutex::new(Vec::new()),
             uploads: Mutex::new(Vec::new()),
-            tool_calls: Mutex::new(Vec::new()),
+            audio_calls: Mutex::new(Vec::new()),
             transcript: Mutex::new(None),
             submit_fails: AtomicBool::new(false),
             wait_calls: AtomicUsize::new(0),
@@ -417,20 +419,6 @@ impl AgentdApi for FakeAgentd {
             "timed_out": self.wait_times_out.load(Ordering::SeqCst),
             "run": {"final_decision": {"reply": "completed reply"}}
         }))
-    }
-
-    async fn call_tool(&self, tool: &str, arguments: Value) -> Result<Value, AgentdError> {
-        self.events.lock().unwrap().push(format!("tool:{tool}"));
-        self.tool_calls
-            .lock()
-            .unwrap()
-            .push((tool.to_string(), arguments));
-        Ok(self
-            .transcript
-            .lock()
-            .unwrap()
-            .clone()
-            .map_or_else(|| json!({}), |text| json!({"text": text})))
     }
 
     async fn claim_delivery_outbox(
@@ -468,6 +456,46 @@ impl AgentdApi for FakeAgentd {
             body,
         });
         Ok(json!({"artifact_ref": format!("artifact://{tenant}/{path}")}))
+    }
+}
+
+struct FakeAudio {
+    agentd: Arc<FakeAgentd>,
+}
+
+#[async_trait]
+impl AudioApi for FakeAudio {
+    async fn transcribe(&self, media: &TempMedia, filename: &str) -> Result<String, AudioError> {
+        self.agentd
+            .events
+            .lock()
+            .unwrap()
+            .push("audio:transcribe".to_string());
+        let body = tokio::fs::read(media.path())
+            .await
+            .map_err(|_| AudioError::Io)?;
+        self.agentd
+            .audio_calls
+            .lock()
+            .unwrap()
+            .push((filename.to_string(), body));
+        let transcript = self
+            .agentd
+            .transcript
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(AudioError::EmptyTranscript)?;
+        let transcript = transcript.trim();
+        if transcript.is_empty() {
+            Err(AudioError::EmptyTranscript)
+        } else {
+            Ok(transcript.to_string())
+        }
+    }
+
+    async fn synthesize(&self, _: &str) -> Result<TempMedia, AudioError> {
+        unreachable!()
     }
 }
 
@@ -600,7 +628,11 @@ async fn run_inbound(
     telegram: Arc<FakeTelegram>,
     updates: Vec<Value>,
 ) {
-    let (sender, worker) = spawn_inbound_worker(config, reqwest::Client::new(), agentd, telegram);
+    let audio = Arc::new(FakeAudio {
+        agentd: agentd.clone(),
+    });
+    let (sender, worker) =
+        spawn_inbound_worker(config, reqwest::Client::new(), agentd, audio, telegram);
     for update in updates {
         sender
             .send(serde_json::from_value(update).unwrap())
@@ -730,7 +762,7 @@ async fn inbound_document_streams_to_sanitized_raw_artifact_path() {
 }
 
 #[tokio::test]
-async fn inbound_voice_uploads_transcribes_sets_record_voice_and_atomically_marks_run() {
+async fn inbound_voice_transcribes_without_agentd_artifact_and_marks_run() {
     let temp = TempDir::new().unwrap();
     let events = Arc::new(Mutex::new(Vec::new()));
     let agentd = Arc::new(FakeAgentd::new(events.clone()));
@@ -752,12 +784,10 @@ async fn inbound_voice_uploads_transcribes_sets_record_voice_and_atomically_mark
     server.abort();
 
     assert_eq!(
-        agentd.tool_calls.lock().unwrap().as_slice(),
-        &[(
-            "audio_transcribe".to_string(),
-            json!({"artifact_ref": "artifact://demo/inbound/telegram/104/voice.ogg"})
-        )]
+        agentd.audio_calls.lock().unwrap().as_slice(),
+        &[("voice.ogg".to_string(), b"voice".to_vec())]
     );
+    assert!(agentd.uploads.lock().unwrap().is_empty());
     assert_eq!(
         agentd.submits.lock().unwrap()[0].payload,
         json!({"text": "spoken words"})
@@ -788,13 +818,8 @@ async fn inbound_voice_uploads_transcribes_sets_record_voice_and_atomically_mark
         );
     }
     assert_eq!(
-        events.lock().unwrap()[..4],
-        [
-            "action:record_voice",
-            "upload",
-            "tool:audio_transcribe",
-            "submit"
-        ]
+        events.lock().unwrap()[..3],
+        ["action:record_voice", "audio:transcribe", "submit"]
     );
 }
 
@@ -907,7 +932,11 @@ async fn inbound_voice_marker_failure_is_observable_from_worker() {
     telegram.add_file("voice-id", "files/voice.ogg", Some(5));
     let mut config = test_config(temp.path(), "42");
     config.state_dir = state_file;
-    let (sender, worker) = spawn_inbound_worker(config, reqwest::Client::new(), agentd, telegram);
+    let audio = Arc::new(FakeAudio {
+        agentd: agentd.clone(),
+    });
+    let (sender, worker) =
+        spawn_inbound_worker(config, reqwest::Client::new(), agentd, audio, telegram);
     sender
         .send(
             serde_json::from_value(message_update(

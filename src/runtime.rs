@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 
 use crate::agentd::{AgentdApi, AgentdClient};
+use crate::audio::{AudioApi, AudioClient};
 use crate::delivery::{prune_voice_reply_markers, DeliveryService};
 use crate::telegram::{TelegramApi, TelegramClient};
 use crate::webhook::{self, WebhookState};
@@ -247,11 +248,13 @@ where
 
     let http = reqwest::Client::new();
     let agentd: Arc<dyn AgentdApi> = Arc::new(AgentdClient::new(http.clone(), config.clone()));
+    let audio: Arc<dyn AudioApi> = Arc::new(AudioClient::new(http.clone(), config.clone()));
     let telegram: Arc<dyn TelegramApi> =
         Arc::new(TelegramClient::new(http.clone(), config.clone()));
     let delivery = Arc::new(DeliveryService::new(
         config.clone(),
         agentd.clone(),
+        audio.clone(),
         telegram.clone(),
     ));
 
@@ -269,7 +272,9 @@ where
     let mut tasks = Vec::with_capacity(3);
     tasks.push(RequiredTask::new(TaskKind::InboundWorker, {
         let config = config.clone();
-        async move { webhook::run_inbound_worker(config, http, agentd, telegram, inbound).await }
+        async move {
+            webhook::run_inbound_worker(config, http, agentd, audio, telegram, inbound).await
+        }
     }));
 
     let server_shutdown = shutdown_rx.clone();

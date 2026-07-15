@@ -9,6 +9,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::agentd::{AgentdApi, AgentdError, DeliveryAck};
+use crate::audio::{AudioApi, AudioError};
 use crate::media::transcode_to_ogg_opus;
 use crate::model::{
     telegram_chat_id_from_destination, DeliveryAttachment, DeliveryLocation, DeliveryOutboxRecord,
@@ -27,14 +28,21 @@ const MARKER_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 pub struct DeliveryService {
     config: Config,
     agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
 }
 
 impl DeliveryService {
-    pub fn new(config: Config, agentd: Arc<dyn AgentdApi>, telegram: Arc<dyn TelegramApi>) -> Self {
+    pub fn new(
+        config: Config,
+        agentd: Arc<dyn AgentdApi>,
+        audio: Arc<dyn AudioApi>,
+        telegram: Arc<dyn TelegramApi>,
+    ) -> Self {
         Self {
             config,
             agentd,
+            audio,
             telegram,
         }
     }
@@ -294,29 +302,11 @@ impl DeliveryService {
         text: &str,
     ) -> Result<SentMessage, DeliveryFailure> {
         let capped: String = text.chars().take(self.config.tts_text_cap).collect();
-        let synthesized = self
-            .agentd
-            .call_tool(
-                "audio_synthesize",
-                json!({
-                    "text": capped,
-                    "policy_intent": "Synthesize a Telegram voice reply requested by the user",
-                }),
-            )
-            .await
-            .map_err(|error| DeliveryFailure::from_agentd("audio_synthesize", error))?;
-        let reference = synthesized
-            .get("artifact_ref")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                DeliveryFailure::validation("audio_synthesize", "missing artifact_ref")
-            })?;
-        let artifact = ArtifactReference::parse(reference, &self.config.tenant)?;
         let media = self
-            .agentd
-            .download_artifact_to_temp(&artifact.tenant, &artifact.path)
+            .audio
+            .synthesize(&capped)
             .await
-            .map_err(|error| DeliveryFailure::from_agentd("artifact_read", error))?;
+            .map_err(DeliveryFailure::from_audio)?;
         let voice = transcode_to_ogg_opus(
             &media,
             &self.config.media_temp_dir,
@@ -439,16 +429,23 @@ impl DeliveryFailure {
                 retry_after: None,
                 message: "artifact backend rejected request",
             },
-            AgentdError::ToolFailure { transient: true } => Self::transient(method, None, None),
-            AgentdError::ToolFailure { transient: false } => Self {
-                category: "permanent_backend",
-                method,
-                status: None,
-                retry_after: None,
-                message: "agentd tool rejected request",
-            },
             AgentdError::Transport | AgentdError::Io(_) | AgentdError::InvalidJson => {
                 Self::transient(method, None, None)
+            }
+        }
+    }
+
+    fn from_audio(error: AudioError) -> Self {
+        let status = error.status();
+        if error.is_transient() {
+            Self::transient("audio_provider", status, None)
+        } else {
+            Self {
+                category: "permanent_backend",
+                method: "audio_provider",
+                status,
+                retry_after: None,
+                message: "audio provider rejected request",
             }
         }
     }

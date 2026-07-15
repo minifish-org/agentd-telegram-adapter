@@ -12,6 +12,7 @@ grep -Fq 'minifish-org/agentd-telegram-adapter.git' "$root/deploy/update-vps.sh"
   "$root/src" \
   "$root/README.md" \
   "$root/deploy"
+! grep -R -q '/tools/execute\|call_tool' "$root/src" "$root/tests"
 
 if command -v systemd-analyze >/dev/null 2>&1; then
   tmp=$(mktemp -d)

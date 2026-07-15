@@ -18,7 +18,8 @@ use tokio::time::{timeout, Instant};
 use uuid::Uuid;
 
 use crate::agentd::{AgentdApi, AgentdError, SubmitTurn};
-use crate::media::download_to_temp;
+use crate::audio::AudioApi;
+use crate::media::{download_to_temp, TempMedia};
 use crate::model::{TelegramChatId, TelegramFile, TelegramMessage, TelegramUpdate};
 use crate::telegram::TelegramApi;
 use crate::Config;
@@ -55,13 +56,16 @@ pub fn spawn_inbound_worker(
     config: Config,
     http: reqwest::Client,
     agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
 ) -> (
     mpsc::Sender<TelegramUpdate>,
     JoinHandle<Result<(), InboundWorkerError>>,
 ) {
     let (sender, receiver) = mpsc::channel(config.webhook_queue_capacity);
-    let worker = tokio::spawn(run_inbound_worker(config, http, agentd, telegram, receiver));
+    let worker = tokio::spawn(run_inbound_worker(
+        config, http, agentd, audio, telegram, receiver,
+    ));
     (sender, worker)
 }
 
@@ -159,6 +163,7 @@ pub async fn run_inbound_worker(
     config: Config,
     http: reqwest::Client,
     agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
     mut receiver: mpsc::Receiver<TelegramUpdate>,
 ) -> Result<(), InboundWorkerError> {
@@ -169,6 +174,7 @@ pub async fn run_inbound_worker(
             &config,
             &http,
             agentd.clone(),
+            audio.clone(),
             telegram.clone(),
             update,
             &mut watchers,
@@ -187,6 +193,7 @@ async fn process_update(
     config: &Config,
     http: &reqwest::Client,
     agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
     update: TelegramUpdate,
     watchers: &mut JoinSet<()>,
@@ -228,6 +235,7 @@ async fn process_update(
         config,
         http,
         agentd.clone(),
+        audio,
         telegram.clone(),
         update_id,
         &message,
@@ -309,6 +317,7 @@ async fn collect_inbound(
     config: &Config,
     http: &reqwest::Client,
     agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
     update_id: i64,
     message: &TelegramMessage,
@@ -323,15 +332,7 @@ async fn collect_inbound(
 
     if let Some(voice) = message.voice.as_ref().or(message.audio.as_ref()) {
         if voice.file_id.is_some() {
-            let transcript = transcribe_voice(
-                config,
-                http,
-                agentd.clone(),
-                telegram.clone(),
-                update_id,
-                voice,
-            )
-            .await;
+            let transcript = transcribe_voice(config, http, audio, telegram.clone(), voice).await;
             if let Some(transcript) = transcript {
                 add_note(&mut text, &transcript);
                 voice_reply = true;
@@ -385,37 +386,20 @@ fn add_note(text: &mut String, note: &str) {
 async fn transcribe_voice(
     config: &Config,
     http: &reqwest::Client,
-    agentd: Arc<dyn AgentdApi>,
+    audio: Arc<dyn AudioApi>,
     telegram: Arc<dyn TelegramApi>,
-    update_id: i64,
     voice: &TelegramFile,
 ) -> Option<String> {
-    let upload = download_and_upload(
-        config,
-        http,
-        agentd.clone(),
-        telegram,
-        update_id,
-        voice,
-        "voice.ogg",
-    )
-    .await?;
-    let result = timeout(
-        config.audio_tool_timeout,
-        agentd.call_tool(
-            "audio_transcribe",
-            json!({"artifact_ref": upload.artifact_ref}),
-        ),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    result
-        .get("text")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(ToOwned::to_owned)
+    let downloaded = download_inbound(config, http, telegram, voice, "voice.ogg").await?;
+    audio
+        .transcribe(&downloaded.media, &downloaded.original_filename)
+        .await
+        .ok()
+}
+
+struct DownloadedInbound {
+    media: TempMedia,
+    original_filename: String,
 }
 
 struct UploadedInbound {
@@ -433,6 +417,32 @@ async fn download_and_upload(
     file: &TelegramFile,
     default_filename: &str,
 ) -> Option<UploadedInbound> {
+    let downloaded = download_inbound(config, http, telegram, file, default_filename).await?;
+    let artifact_path = format!(
+        "inbound/telegram/{update_id}/{}",
+        sanitize_filename(&downloaded.original_filename)
+    );
+    let response = timeout(
+        config.media_timeout,
+        agentd.upload_artifact_from_file(&config.tenant, &artifact_path, &downloaded.media),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let artifact_ref = response.get("artifact_ref")?.as_str()?.to_string();
+    Some(UploadedInbound {
+        artifact_ref,
+        original_filename: downloaded.original_filename,
+    })
+}
+
+async fn download_inbound(
+    config: &Config,
+    http: &reqwest::Client,
+    telegram: Arc<dyn TelegramApi>,
+    file: &TelegramFile,
+    default_filename: &str,
+) -> Option<DownloadedInbound> {
     if file
         .file_size
         .is_some_and(|size| size > TELEGRAM_HOSTED_DOWNLOAD_CAP)
@@ -453,7 +463,7 @@ async fn download_and_upload(
     let remote_path = file_info.file_path.as_deref()?;
     let url = telegram.file_url(remote_path).ok()?;
     let media = timeout(
-        config.audio_tool_timeout,
+        config.media_timeout,
         download_to_temp(
             http,
             url,
@@ -469,20 +479,8 @@ async fn download_and_upload(
         .clone()
         .or_else(|| remote_filename(remote_path))
         .unwrap_or_else(|| default_filename.to_string());
-    let artifact_path = format!(
-        "inbound/telegram/{update_id}/{}",
-        sanitize_filename(&original_filename)
-    );
-    let response = timeout(
-        config.audio_tool_timeout,
-        agentd.upload_artifact_from_file(&config.tenant, &artifact_path, &media),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    let artifact_ref = response.get("artifact_ref")?.as_str()?.to_string();
-    Some(UploadedInbound {
-        artifact_ref,
+    Some(DownloadedInbound {
+        media,
         original_filename,
     })
 }

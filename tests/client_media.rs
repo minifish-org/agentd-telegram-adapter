@@ -288,124 +288,6 @@ async fn client_agentd_rejects_artifact_tenant_mismatch_before_request() {
 }
 
 #[tokio::test]
-async fn client_agentd_executes_tool_via_control_plane_and_unwraps_result() {
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    let base = capture_server(
-        captured.clone(),
-        vec![json!({
-            "tool_name": "audio_synthesize",
-            "ok": true,
-            "result": {"artifact_ref": "artifact://demo/speech.wav"}
-        })],
-    )
-    .await;
-    let client = AgentdClient::new(
-        reqwest::Client::new(),
-        test_config(|config| {
-            config.agentd_url = base;
-            config.agentd_token = Some("agent-secret".to_string());
-            config.tenant = "demo".to_string();
-        }),
-    );
-
-    let result = client
-        .call_tool("audio_synthesize", json!({"text": "hello"}))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        result,
-        json!({"artifact_ref": "artifact://demo/speech.wav"})
-    );
-    let requests = captured.lock().await;
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method, Method::POST);
-    assert_eq!(requests[0].path_and_query, "/v1/tenants/demo/tools/execute");
-    assert_eq!(
-        serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
-        json!({
-            "name": "audio_synthesize",
-            "params": {"text": "hello"}
-        })
-    );
-    assert_eq!(
-        requests[0]
-            .headers
-            .get("authorization")
-            .and_then(|value| value.to_str().ok()),
-        Some("Bearer agent-secret")
-    );
-}
-
-#[tokio::test]
-async fn client_agentd_tool_failure_does_not_expose_backend_error() {
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    let base = capture_server(
-        captured,
-        vec![json!({
-            "tool_name": "audio_synthesize",
-            "ok": false,
-            "result": {},
-            "error": "sensitive backend body with agent-secret",
-            "error_category": "permanent_backend"
-        })],
-    )
-    .await;
-    let client = AgentdClient::new(
-        reqwest::Client::new(),
-        test_config(|config| {
-            config.agentd_url = base;
-            config.agentd_token = Some("agent-secret".to_string());
-            config.tenant = "demo".to_string();
-        }),
-    );
-
-    let error = client
-        .call_tool("audio_synthesize", json!({"text": "hello"}))
-        .await
-        .unwrap_err();
-
-    assert_eq!(error.to_string(), "agentd tool execution failed");
-    assert!(!format!("{error:?}").contains("sensitive backend body"));
-    assert!(!format!("{error:?}").contains("agent-secret"));
-}
-
-#[tokio::test]
-async fn client_agentd_tool_failure_only_trusts_explicit_transient_category() {
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    let base = capture_server(
-        captured,
-        vec![
-            json!({"ok": false, "error_category": "transient_backend"}),
-            json!({"ok": false}),
-            json!({"ok": false, "error_category": "future_category"}),
-        ],
-    )
-    .await;
-    let client = AgentdClient::new(
-        reqwest::Client::new(),
-        test_config(|config| {
-            config.agentd_url = base;
-            config.tenant = "demo".to_string();
-        }),
-    );
-
-    let mut retryability = Vec::new();
-    for _ in 0..3 {
-        let AgentdError::ToolFailure { transient } = client
-            .call_tool("audio_synthesize", json!({"text": "hello"}))
-            .await
-            .unwrap_err()
-        else {
-            panic!("expected a typed tool failure");
-        };
-        retryability.push(transient);
-    }
-
-    assert_eq!(retryability, vec![true, false, false]);
-}
-
-#[tokio::test]
 async fn client_agentd_redacts_token_from_http_response_body_and_reflected_request_url() {
     let token = "agent-secret-token";
     let base = agentd_reflecting_error_server(token).await;
@@ -1317,6 +1199,7 @@ fn test_config(override_config: impl FnOnce(&mut Config)) -> Config {
     let mut config = Config::from_lookup(|key| match key {
         "BOT_TOKEN" => Some("123:test-token".to_string()),
         "WEBHOOK_SECRET" => Some("test-secret".to_string()),
+        "AUDIO_API_BASE" => Some("https://audio.example/v1".to_string()),
         _ => None,
     })
     .unwrap();

@@ -236,7 +236,7 @@ impl TelegramApi for TelegramClient {
         let response = self
             .http
             .post(self.method_url(method)?)
-            .timeout(self.config.audio_tool_timeout)
+            .timeout(self.config.media_timeout)
             .multipart(form)
             .send()
             .await
