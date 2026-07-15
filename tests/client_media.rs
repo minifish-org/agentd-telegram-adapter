@@ -5,7 +5,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agentd_telegram_adapter::agentd::{AgentdApi, AgentdClient, AgentdError, DeliveryAck};
+use agentd_telegram_adapter::agentd::{
+    AgentdApi, AgentdClient, AgentdError, DeliveryAck, DeliveryRequest, SubmitTurn,
+};
 use agentd_telegram_adapter::media::{
     download_to_temp, prepare_voice_for_upload, transcode_to_ogg_opus,
     transcode_to_ogg_opus_with_timeout, MediaError, TempMedia, FFMPEG_TIMEOUT,
@@ -391,6 +393,48 @@ async fn client_agentd_claim_and_ack_preserve_typed_ids_and_payload_json() {
             "outcome": "delivered",
             "error": null,
             "retry_after_ms": null
+        })
+    );
+}
+
+#[tokio::test]
+async fn client_agentd_submits_only_the_async_turn_contract() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let run_id = Uuid::new_v4();
+    let base = capture_server(
+        captured.clone(),
+        vec![json!({"run_id": run_id, "status": "queued"})],
+    )
+    .await;
+    let client = AgentdClient::new(
+        reqwest::Client::new(),
+        test_config(|config| config.agentd_url = base),
+    );
+
+    let response = client
+        .submit_turn(SubmitTurn {
+            tenant: "demo".into(),
+            agent_ref: "simple-bot".into(),
+            scope: "tg:42".into(),
+            payload: json!({"text":"hello"}),
+            delivery: DeliveryRequest {
+                destination: "tg:42".into(),
+            },
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response["run_id"], run_id.to_string());
+    let requests = captured.lock().await;
+    assert_eq!(requests[0].method, Method::POST);
+    assert_eq!(requests[0].path_and_query, "/v1/tenants/demo/turns");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
+        json!({
+            "agent":"simple-bot",
+            "scope":"tg:42",
+            "payload":{"text":"hello"},
+            "delivery":{"destination":"tg:42"}
         })
     );
 }

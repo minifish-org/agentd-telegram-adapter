@@ -6,8 +6,8 @@ submits tenant-scoped turns to agentd, and sends replies exclusively from the
 delivery outbox.
 
 ```text
-Telegram -> POST /v1/tenants/:tenant/turns
-run commit -> output + delivery row
+Telegram -> POST /v1/tenants/:tenant/turns + explicit tg:<chat_id> delivery
+run commit -> canonical output + optional delivery reference
 adapter -> claim -> Telegram API -> ack
 Telegram voice -> adapter -> ASR provider
 voice reply <- adapter <- TTS provider
@@ -15,7 +15,8 @@ voice reply <- adapter <- TTS provider
 
 It never reads agentd's database, links agentd crates, uses run output as a
 fallback, or replies directly from the webhook path. Every chat uses the stable
-scope `tg:<chat_id>`.
+scope `tg:<chat_id>` and explicitly requests delivery to the same Telegram
+destination; agentd never guesses a destination from the scope.
 
 ## Configuration
 

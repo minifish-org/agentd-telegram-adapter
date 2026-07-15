@@ -285,12 +285,18 @@ impl AgentdApi for AgentdClient {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SubmitTurn {
+    #[serde(skip_serializing)]
     pub tenant: String,
     #[serde(rename = "agent")]
     pub agent_ref: String,
     pub scope: String,
     pub payload: Value,
-    pub wait: bool,
+    pub delivery: DeliveryRequest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliveryRequest {
+    pub destination: String,
 }
 
 #[derive(Debug, Clone)]

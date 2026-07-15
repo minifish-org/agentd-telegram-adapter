@@ -17,7 +17,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{timeout, Instant};
 use uuid::Uuid;
 
-use crate::agentd::{AgentdApi, AgentdError, SubmitTurn};
+use crate::agentd::{AgentdApi, AgentdError, DeliveryRequest, SubmitTurn};
 use crate::audio::AudioApi;
 use crate::media::{download_to_temp, TempMedia};
 use crate::model::{TelegramChatId, TelegramFile, TelegramMessage, TelegramUpdate};
@@ -260,7 +260,9 @@ async fn process_update(
             agent_ref: config.agent_ref.clone(),
             scope: format!("tg:{chat_id}"),
             payload,
-            wait: false,
+            delivery: DeliveryRequest {
+                destination: format!("tg:{chat_id}"),
+            },
         }),
     )
     .await;

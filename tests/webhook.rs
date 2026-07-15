@@ -705,7 +705,7 @@ async fn inbound_text_and_caption_use_the_stable_turn_shape() {
     assert_eq!(submits[0].tenant, "demo");
     assert_eq!(submits[0].agent_ref, "simple-bot");
     assert_eq!(submits[0].scope, "tg:1001");
-    assert!(!submits[0].wait);
+    assert_eq!(submits[0].delivery.destination, "tg:1001");
     assert_eq!(submits[0].payload, json!({"text": "hello"}));
     assert_eq!(submits[1].payload, json!({"text": "caption only"}));
     assert!(telegram
