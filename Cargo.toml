@@ -1,0 +1,35 @@
+[package]
+name = "agentd-telegram-adapter"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+authors = ["minifish contributors"]
+description = "Telegram webhook and delivery-outbox adapter for agentd"
+repository = "https://github.com/minifish-org/agentd-telegram-adapter"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["macros"] }
+bytes = "1"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+hostname = "0.4"
+http = "1"
+libc = "0.2"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs", "process", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.dev]
+debug = "line-tables-only"
