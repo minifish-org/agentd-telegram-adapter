@@ -64,7 +64,7 @@ impl Config {
             agentd_url: parse_url_with_default(
                 &mut lookup,
                 "AGENTD_URL",
-                "http://100.119.151.103:8080",
+                "https://minifish-home.taila2cd17.ts.net",
             )?,
             agentd_token: optional_string(&mut lookup, "AGENTD_TOKEN"),
             audio_api_base,
@@ -362,6 +362,10 @@ mod tests {
         let config = Config::from_lookup(|key| env.get(key)).unwrap();
         assert_eq!(config.listen_host, "127.0.0.1");
         assert_eq!(config.listen_port, 80);
+        assert_eq!(
+            config.agentd_url.as_str(),
+            "https://minifish-home.taila2cd17.ts.net/"
+        );
         assert_eq!(config.tenant, "demo");
         assert_eq!(config.asr_model, "local/asr");
         assert_eq!(config.tts_model, "local/tts");
