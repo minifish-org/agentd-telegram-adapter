@@ -7,15 +7,15 @@ delivery outbox.
 
 ```text
 Telegram -> POST /v1/tenants/:tenant/turns
-output_emit -> delivery row
+run commit -> output + delivery row
 adapter -> claim -> Telegram API -> ack
 Telegram voice -> adapter -> ASR provider
 voice reply <- adapter <- TTS provider
 ```
 
 It never reads agentd's database, links agentd crates, uses run output as a
-fallback, or replies directly from the webhook path. Every chat uses scope and
-lane `tg:<chat_id>`.
+fallback, or replies directly from the webhook path. Every chat uses the stable
+scope `tg:<chat_id>`.
 
 ## Configuration
 
@@ -29,8 +29,7 @@ and `TTS_VOICE` default to `local/asr`, `local/tts`, and `default`.
 
 Inbound voice files go directly from Telegram to
 `/audio/transcriptions`. Voice replies go directly through `/audio/speech`
-and ffmpeg before Telegram upload. Neither path uses agentd artifacts or the
-operator tool-execution endpoint.
+and ffmpeg before Telegram upload. Neither path uses agentd artifacts.
 
 The service also reads `/etc/tg-adapter-decoy.env` for the public decoy response
 served at `/`. Telegram webhooks are accepted only on the configured secret

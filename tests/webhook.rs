@@ -417,7 +417,7 @@ impl AgentdApi for FakeAgentd {
         }
         Ok(json!({
             "timed_out": self.wait_times_out.load(Ordering::SeqCst),
-            "run": {"final_decision": {"reply": "completed reply"}}
+            "output": {"reply": "completed reply"}
         }))
     }
 
