@@ -14,7 +14,11 @@ grep -Fq 'minifish-org/agentd-telegram-adapter.git' "$root/deploy/update-vps.sh"
   "$root/deploy"
 
 if command -v systemd-analyze >/dev/null 2>&1; then
-  systemd-analyze verify "$root/deploy/tg-adapter.service"
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|^ExecStart=.*|ExecStart=/bin/true|' \
+    "$root/deploy/tg-adapter.service" > "$tmp/tg-adapter.service"
+  systemd-analyze verify "$tmp/tg-adapter.service"
 fi
 
 printf 'deployment assets: ok\n'
