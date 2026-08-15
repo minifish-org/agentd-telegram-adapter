@@ -21,6 +21,7 @@ fn config(root: &std::path::Path) -> Config {
     let values = HashMap::from([
         ("BOT_TOKEN", "bot-secret".to_string()),
         ("WEBHOOK_SECRET", "webhook-secret".to_string()),
+        ("AGENTD_URL", "https://agentd.example".to_string()),
         ("AUDIO_API_BASE", "https://audio.example/v1".to_string()),
         ("STATE_DIR", root.display().to_string()),
         ("MEDIA_TEMP_DIR", root.join("media").display().to_string()),

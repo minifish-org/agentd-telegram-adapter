@@ -7,7 +7,13 @@ bash -n "$root/deploy/update-vps.sh"
 grep -Fq '"deliveries", "claim"' "$root/src/agentd.rs"
 grep -Fq '"ack",' "$root/src/agentd.rs"
 grep -Fq 'repo_dir=/opt/agentd-telegram-adapter' "$root/deploy/update-vps.sh"
-grep -Fq 'minifish-org/agentd-telegram-adapter.git' "$root/deploy/update-vps.sh"
+grep -Fq 'test "$#" -eq 1 || usage' "$root/deploy/update-vps.sh"
+grep -Fq 'repo_url=https://github.com/minifish-org/agentd-telegram-adapter.git' \
+  "$root/deploy/update-vps.sh"
+! grep -R -q 'minifish-home\|taila2cd17\|target=${1:-singapore}' \
+  "$root/src" \
+  "$root/README.md" \
+  "$root/deploy"
 ! grep -R -q '/v1/turns\|delivery/outbox\|/receipt' \
   "$root/src" \
   "$root/README.md" \

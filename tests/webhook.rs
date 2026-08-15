@@ -43,6 +43,7 @@ fn test_config(root: &Path, allowed_users: &str) -> Config {
     let values = HashMap::from([
         ("BOT_TOKEN", "bot-secret".to_string()),
         ("WEBHOOK_SECRET", "webhook-secret".to_string()),
+        ("AGENTD_URL", "https://agentd.example".to_string()),
         ("AUDIO_API_BASE", "https://audio.example/v1".to_string()),
         ("DECOY_FILE", decoy.display().to_string()),
         ("STATE_DIR", root.display().to_string()),

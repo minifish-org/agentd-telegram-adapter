@@ -31,6 +31,7 @@ fn config_fixture() -> (Config, TempDir) {
         "WEBHOOK_SECRET" => Some("webhook-secret-that-must-stay-secret".to_string()),
         "LISTEN_HOST" => Some("127.0.0.1".to_string()),
         "LISTEN_PORT" => Some("0".to_string()),
+        "AGENTD_URL" => Some("https://agentd.example".to_string()),
         "AGENTD_TOKEN" => Some("agentd-token-that-must-stay-secret".to_string()),
         "AUDIO_API_BASE" => Some("https://audio.example/v1".to_string()),
         "ALLOWED_TG_USERS" => Some("99887766".to_string()),
@@ -241,6 +242,7 @@ fn binary_lifecycle_logs_are_static_and_environment_free() {
         .env_clear()
         .env("BOT_TOKEN", "lifecycle-secret-bot-token")
         .env("WEBHOOK_SECRET", "lifecycle-secret-webhook")
+        .env("AGENTD_URL", "https://agentd.example")
         .env("AUDIO_API_BASE", "https://audio.example/v1")
         .env("LISTEN_HOST", "127.0.0.1")
         .env("LISTEN_PORT", port.to_string())

@@ -2,7 +2,7 @@
 name = "agentd-telegram-adapter"
 version = "0.1.0"
 edition = "2021"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 authors = ["minifish contributors"]
 description = "Telegram webhook and delivery-outbox adapter for agentd"
 repository = "https://github.com/minifish-org/agentd-telegram-adapter"

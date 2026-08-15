@@ -11,8 +11,8 @@ valid_ssh_target() {
   [[ "$1" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
 }
 
-test "$#" -le 1 || usage
-target=${1:-singapore}
+test "$#" -eq 1 || usage
+target=$1
 valid_ssh_target "$target" || { printf 'error: unsafe SSH target\n' >&2; exit 2; }
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -36,7 +36,7 @@ ssh "$target" 'bash -se' <<'REMOTE'
 set -Eeuo pipefail
 
 repo_dir=/opt/agentd-telegram-adapter
-repo_url=git@github.com:minifish-org/agentd-telegram-adapter.git
+repo_url=https://github.com/minifish-org/agentd-telegram-adapter.git
 toolchain=1.92.0
 service=tg-adapter.service
 unit_path=/etc/systemd/system/tg-adapter.service

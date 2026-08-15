@@ -1243,6 +1243,7 @@ fn test_config(override_config: impl FnOnce(&mut Config)) -> Config {
     let mut config = Config::from_lookup(|key| match key {
         "BOT_TOKEN" => Some("123:test-token".to_string()),
         "WEBHOOK_SECRET" => Some("test-secret".to_string()),
+        "AGENTD_URL" => Some("https://agentd.example".to_string()),
         "AUDIO_API_BASE" => Some("https://audio.example/v1".to_string()),
         _ => None,
     })

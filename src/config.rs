@@ -61,11 +61,7 @@ impl Config {
         Ok(Self {
             listen_host: string_with_default(&mut lookup, "LISTEN_HOST", "127.0.0.1"),
             listen_port: parse_value_with_default(&mut lookup, "LISTEN_PORT", 80u16)?,
-            agentd_url: parse_url_with_default(
-                &mut lookup,
-                "AGENTD_URL",
-                "https://minifish-home.taila2cd17.ts.net",
-            )?,
+            agentd_url: parse_required_url(&mut lookup, "AGENTD_URL")?,
             agentd_token: optional_string(&mut lookup, "AGENTD_TOKEN"),
             audio_api_base,
             audio_api_key: optional_string(&mut lookup, "AUDIO_API_KEY"),
@@ -80,7 +76,7 @@ impl Config {
             decoy_file: parse_path_with_default(
                 &mut lookup,
                 "DECOY_FILE",
-                "/home/admin/httpd/index.html",
+                "/var/lib/agentd-tg-adapter/decoy.html",
             ),
             telegram_api_base: parse_url_with_default(
                 &mut lookup,
@@ -355,17 +351,14 @@ mod tests {
     use super::{default_worker_id, Config};
 
     #[test]
-    fn current_environment_defaults_are_preserved() {
+    fn non_sensitive_environment_defaults_are_preserved() {
         let env = TestEnv::new()
             .set("BOT_TOKEN", "123:secret")
             .set("WEBHOOK_SECRET", "hook-secret");
         let config = Config::from_lookup(|key| env.get(key)).unwrap();
         assert_eq!(config.listen_host, "127.0.0.1");
         assert_eq!(config.listen_port, 80);
-        assert_eq!(
-            config.agentd_url.as_str(),
-            "https://minifish-home.taila2cd17.ts.net/"
-        );
+        assert_eq!(config.agentd_url.as_str(), "https://agentd.example/");
         assert_eq!(config.tenant, "demo");
         assert_eq!(config.asr_model, "local/asr");
         assert_eq!(config.tts_model, "local/tts");
@@ -394,7 +387,8 @@ mod tests {
 
         let env = TestEnv::default()
             .set("BOT_TOKEN", "123:secret")
-            .set("WEBHOOK_SECRET", "hook-secret");
+            .set("WEBHOOK_SECRET", "hook-secret")
+            .set("AGENTD_URL", "https://agentd.example");
         let error = Config::from_lookup(|key| env.get(key))
             .unwrap_err()
             .to_string();
@@ -520,6 +514,7 @@ mod tests {
     impl TestEnv {
         fn new() -> Self {
             Self::default()
+                .set("AGENTD_URL", "https://agentd.example")
                 .set("AUDIO_API_BASE", "https://audio.example/v1")
                 .set("AUDIO_API_KEY", "audio-secret")
         }

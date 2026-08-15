@@ -24,6 +24,7 @@ fn config(root: &std::path::Path, base: Url) -> Config {
     let mut config = Config::from_lookup(|key| match key {
         "BOT_TOKEN" => Some("bot-secret".to_string()),
         "WEBHOOK_SECRET" => Some("webhook-secret".to_string()),
+        "AGENTD_URL" => Some("https://agentd.example".to_string()),
         "AUDIO_API_BASE" => Some("https://unused.example/v1".to_string()),
         "AUDIO_API_KEY" => Some("provider-secret".to_string()),
         _ => None,
